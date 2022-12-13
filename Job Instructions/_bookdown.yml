@@ -1,0 +1,7 @@
+book_filename: "report"
+language:
+  ui:
+    chapter_name: ""
+delete_merged_file: TRUE
+delete_rmd: TRUE
+always_allow_html: yes

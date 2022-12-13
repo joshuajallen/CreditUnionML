@@ -1,0 +1,185 @@
+--- 
+title: "Predicting Credit Union Failure - A Machine Learning Approach"
+author: "Joshua Allen, PRA Data Innovation"
+date: "`r Sys.Date()`"
+knit: "bookdown::render_book"
+site: bookdown::bookdown_site
+output: bookdown::gitbook
+documentclass: book
+bibliography: [book.bib, packages.bib]
+biblio-style: apalike
+link-citations: yes
+github-repo: rstudio/bookdown-demo
+description: "This report explores an array of machine learning approaches for classifying credit unions as at risk of default (DEFAULT = 1) or not at risk (DEFAULT = 0)"
+cover-image: images/cover.png
+always_allow_html: yes
+---
+
+
+```{r, include =FALSE}
+library(tidyverse)
+library(data.table)
+library(stargazer)
+library(tidyverse)
+library(tidymodels)
+library(ggplot2)
+library(ggcorrplot)
+library(parsnip)
+library(ranger)
+library(tictoc)
+library(imbalance)
+library(cvAUC)
+library(ROSE)
+library(gridExtra)
+library(mice)
+library(xgboost)
+library(kknn)
+library(discrim)
+library(kernlab)
+library(ISLR)
+library(MASS)
+library(e1071)
+library(gmodels)
+library(neuralnet)
+library(NeuralNetTools)
+library(caret)
+library(formattable)
+library(kableExtra)
+library(grid)
+library(graphics)
+library(randomForest)
+basePath = file.path("C:/Users/328576/source/repos/CreditUnionFailureML")
+source(file.path(basePath, "Scripts/MachineLearningFunctions.R"))
+
+options(scipen = 999)
+options(digits = 2)
+knitr::opts_chunk$set(echo=FALSE)
+options(width = 100)
+```
+
+```{r, include=TRUE, warning=FALSE, message=FALSE, echo=FALSE, eval=TRUE}
+# source data from files
+dataRaw = data.table:: fread(file.path(basePath, "Data/CreditUnionMLData.csv"), stringsAsFactors = FALSE)
+#select columns to keep
+cols = colnames(dataRaw)[which(!grepl(pattern = "failure", x = colnames(dataRaw), ignore.case = TRUE))]
+#prepare data 
+dataClean = dataRaw[, match(cols, colnames(dataRaw)), with = FALSE]
+dataClean = dataClean[, `:=`(CapitalRatio = CY_30E)][,-"CY_30E"]
+```
+
+<div class="logos"><img src="logo.png" width="220px" align="right"></div>
+
+
+<hr />
+
+<br />
+
+_The views expressed in this paper are those of the authors, and not necessarily those of the Bank of England or any of its committees. This paper was undertook as part of a univeristy assignment and is an extension of past and present ongoing research in the bank. For more information on the original research please see the Staff Working Paper No. 658 [The determinants of credit union failure in the United Kingdom: how important are macroeconomic factors?](https://www.bankofengland.co.uk/-/media/boe/files/working-paper/2018/the-determinants-of-credit-union-failure-in-the-uk-update.pdf?la=en&hash=4D30F860543FE038FADB8655FD70559C9F6D348F)_
+
+All the analysis scripts are stored and version controlled in TFS under [CreditUnionFailureML](https://almplatform/tfs/UnmanagedCollection/ProjRDG/_git/CreditUnionFailureML). Code snippets are included throughout this paper for the benefit of the readers either looking to reproduce this analysis or apply similar techniques elsewhere. 
+
+Contacts:
+
+<sub><sup>
+
+(1) Bank of England. Email: joshua.allen@bankofengland.co.uk
+
+(2) Bank of England and London School of Economics. Email: jamie.coen@bankofengland.co.uk
+
+(3) Bank of England. Email: bill.francis@bankofengland.co.uk
+
+(4) Bank of England and University College London. Email: may.rostom@bankofengland.co.uk
+
+</sup></sub>
+
+
+<br />
+
+<hr />
+
+<P style="page-break-before: always">
+
+# Abstract 
+
+This paper examines the application of a suite of machine learning methods looking to predict credit union failure in the UK. The aim is to support the supervisory review process by understanding the benefits and limitations of machine learning as an early warning system for identifying credit union failures. A set of indicators on a firms financial health combined with macroeconomic variables such as growth and inflation are used as the feature set in the analysis. The report is divided as follows: (i) Chapter 1 introduces the classification problem and the feature set. (ii) Chapter 2 explores the pre-processing steps in preparing the data for training (model fit), validation (calibration) and testing (evaluation). (iii) Chapter 3 analyses the performance of nine classification algorithms, which includes, linear discriminant analysis, neural networks, naive Bayes, random forests and support vector machines. Performance is set out according to some criterion applied to the testing data, hence out-of-sample evaluation. (iv) Chapter 4 takes the best performing subset of these methods forward to perform cross validation, whilst covering important concepts such as the bias-variance trade-off, optimal model complexity and scalability.(v) Chapter 5 explores feature importance and (iv) Chapter 6 provides a conclusion and concise model summary.
+
+<P style="page-break-before: always">
+
+# Introduction {#intro}
+
+Credit union failures are not uncommon. There have been 78 occurrences since 2002 as recorded in the data set utilised in this paper, equating to an average of 5/year. Credit union business models are inherently risky, with some offering products and services to a homogenous group of clients or having large exposures relative to their overall balance sheet size. This could make it hard for them to diversify their risks compared with larger banks. A credit union failure is where an institution is referred to the Financial Services Compensation Scheme (FSCS) for depositor pay-out. The data consists of a set of firm level financial indicators compiled from regulatory returns and macroeconomic variables covering the UK for the period 2002 to 2018 [@coen2018]. 
+
+The feature set includes firm measures of capital, liquidity, non-performing loans and balance sheet size. This is combined with macroeconomic indicators on unemployment (regionally), inflation (CPI) and economic growth (GDP, Quarterly). The response variable is a credit union `DEFAULT`, which is a Boolean indicator that takes the value `1` if the credit union defaults and `0` otherwise. Table 1 shows the summary statistics for the predictors below.
+
+<br /> 
+
+```{r, results='asis'}
+variables<-c("roa", "pctarrears", "loandeposit", "simplecapitalratio",
+             "provlns", "logassets", "unsecassets", "CapitalRatio", "arrears312", "arrearsg12",
+             "CPI", "GDP.Growth.Quarter.Last.Year", "Base.Rate", "Regunemployment")
+
+y <- dataClean[, variables, with = FALSE]
+
+colnames(y)<- c("Return on Assets (%)","Arrears rate (%)", "Loan-deposit ratio (%)", "Risk-adjusted capital ratio (%)", 
+               "Provisions-loans ratio (%)", paste0("Log assets(", "\u00A3", ")"), "Unsecured loans to assets (%)", "Capital ratio (%)", "Arrears < 12 Months (%)", "Arrears > 12 Months (%)", "Inflation (%, CPI)", "GDP Growth (Quarterly, %)",  "Bank Rate (%)", "Regional Unemployment Rate (%)")
+
+stargazer:: stargazer(y,type="html", digits=1, title = "Table 1: Summary Statistics of Credit Union Data", 
+                      column.sep.width = "1000pt", font.size = "tiny", align = TRUE, 
+                      omit.summary.stat = c("max", "min")
+)
+
+
+```
+
+<br /> 
+
+The dataset is heavily imbalanced, with ```r nrow(dataClean[which(dataClean$DEFAULT != 0)])``` `DEFAULT` occurrences in the data and ```r nrow(dataClean[which(dataClean$DEFAULT != 1)])``` active credit union observations at the date of reporting. The imbalanced nature of the dataset will be explored more in [Chapter 3](#modelsetup).  
+
+In order to develop a better understanding of the data, a boxplot of each of the predictors are compared against `DEFAULT` rates are shown in Chart 1. 
+
+```{r, include=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+
+variables<-c("DEFAULT", "roa", "pctarrears", "loandeposit", "simplecapitalratio",
+             "provlns", "logassets", "unsecassets", "CapitalRatio", "arrears312", "arrearsg12",
+             "CPI", "GDP.Growth.Quarter.Last.Year", "Base.Rate", "Regunemployment")
+
+DataML <- dataClean[, variables, with = FALSE]
+DataML <- na.omit(DataML)
+DataML <- PrepForRecipe(as.data.frame(DataML))
+
+dataPlot <- tidyr:: gather(DataML, key = Feature, value = Position, -DEFAULT) %>% dplyr:: filter(Feature %in% c("logassets", "roa", "loandeposit", "pctarrears", "Regunemployment", "unsecassets"))
+
+#box plot
+
+p <- ggplot2:: ggplot(dataPlot, ggplot2:: aes(x = DEFAULT, y = Position, fill = DEFAULT)) +
+  ggplot2:: geom_boxplot() +
+  ggplot2:: labs(title = NULL, subtitle = "Chart 1: Box plot of predictors against Defaults",
+                 y=NULL, x=NULL)  +
+  ggplot2:: theme_minimal() +
+  ggplot2:: scale_fill_manual(values = rep(unname(boe_cols), 100)) + 
+  ggplot2:: coord_flip() +
+  ggplot2:: facet_wrap(~Feature, scales = "free_x") 
+
+p
+
+```
+
+Chart 1 provides some useful insights into the relationship between `DEFAULT` and the predictors in the data. It is clear that `DEFAULT` rates amongst credit unions are generally higher when total assets and return on assets (`roa`) are lower. Similarly, `DEFAULT` rates appear to be lower amongst entities with overall lower loan to deposit ratios, percentage of loans in arrears, unsecured assets and regional unemployment. These are all intuitive results, for example it is expected that the firm size to be inversely correlated with `DEFAULT` rates, since larger credit unions are likely to have a more diverse balance sheet and can withstand economic shocks. To understand how these variables interact with one another, Chart 2 shows a correlation plot of the features. 
+
+```{r, include=TRUE, warning=FALSE, message=FALSE, echo=FALSE}
+
+corr <- round(cor(dplyr:: select(DataML, -DEFAULT)), 1)
+
+# Plot
+ggcorrplot:: ggcorrplot(corr, hc.order = TRUE, 
+                        type = "lower", 
+                        lab = TRUE, 
+                        lab_size = 3, 
+                        method="circle", 
+                        colors = c("#CAC0B6","white", "#006663"), 
+                        title="Chart 2: Correlogram of predictors", 
+                        ggtheme=theme_bw)
+
+```
+
+Chart 2 suggests there is some correlation between features, most notably unsecured assets and the loan to deposit ratio, percentage loans in arrears and loan provisions and some pronounced correlation amongst the macroeconomic indicators. A consideration here is to remove features that are highly correlated, particularly to limit issues with dimensionality and scalability of the algorithms; however this is not applied here.

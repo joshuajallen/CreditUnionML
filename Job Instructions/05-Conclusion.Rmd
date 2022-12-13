@@ -1,0 +1,663 @@
+---
+title: "Conclusion"
+output:
+  rmdformats::readthedown:
+    highlight: kate
+    code_folding: show
+    thumbnails: true
+    gallery: true
+    fig_width: 10
+    fig_height: 8
+    df_print: kable
+---
+```{r setupComments, include=FALSE}
+
+## Global options
+options(max.print = "75")
+knitr::opts_chunk$set(echo = TRUE,
+	             cache = FALSE,
+               prompt = FALSE,
+               tidy = TRUE,
+               comment = NA,
+               message = FALSE,
+               warning = FALSE )
+knitr::opts_knit$set(width = 100, highr.opts = 75, self.contained = TRUE)
+
+```
+
+# Conclusion {#conclusion}
+
+This paper introduced an array of supervised machine learning classification algorithms and explored the effectiveness of each in predicting credit union defaults. The classifiers included artificial neural networks, support vector machines, naive Bayes, linear discriminant analysis, support vector machines and tree algorithms, which were all measured against the baseline fit in the form of a logistic model. The baseline logistic, naive Bayes, LDA and neural networks performed best as measured by balanced accuracy and specificity, which helped capture the supervisory preference between Type I error and a Type II error. The four aforementioned classifiers were taken forward to undergo model calibration, which consisted of changing the rebalancing method, changing the resampling method and varying the model’s degrees of freedom. It resulted that there ANN performed best, on the basis its Type I error was comparable to the other models, whilst its Type II error outperformed the other classifiers significantly. The neural network itself poses some challenges, namely overfitting and the interpretability of the results (‘black box methods’).
+
+This analysis highlighted that there is no ‘fixed’ machine learning model, but a large array of model types, each of which consist of their own degrees of freedom, sets of hyper-parameters and different interpretations of ‘success’ as captured by the performance metrics. The ‘success’ is a combination of the right model ingredients, but also depends on the knowledge and understanding of the end user (supervisory teams), whilst keeping one eye on the end goal, that is to flag firms that are at risk of default, whilst minimising the overall number of false flags of perfectly viable entities. It follows that the ANN model is the best when considering these trade-offs; however it could be limited in its application due to its lack of interpretability and scalability due to computational challenges. In light of this, other classification algorithms may be preferred; however, in this paper, artificial neural networks demonstrated its ability to uncover nuanced relations between variables and account for heterogeneity amongst enitities.
+
+# References
+
+<div id="refs"></div>
+
+ <br /> 
+ 
+
+# Appendix {#annex}
+
+## Extensions 
+
+### Multi-step forecast
+
+This analysis was conducted using a static approach, i.e. a model that is looking to predict credit union defaults during in a single reporting period. Based on a regulatory returns submitted to the Bank of England, firm information could be used to help classifying entities into one of two categories, `DEFAULT` and `NON DEFAULT`. The firms falling into the first category could then be triaged and put forward for further investigation. This is known as a One-Step Forecast, which is where the next time step (t+1) is predicted.
+
+It is possible to extend the machine learning approach to model failure using a multi-period model since there is an appetite from supervisors to anticipate failure regardless time period. This could be incorporated into the model by including time dummy variables (year effects) in the feature set. This is known as a Multi-Step Forecast, which is where two or more future time steps (t+1, t+2, t+3, ..., t+n) are to be predicted. It would be expected that over a given time horizon over which we predict failure, model performance would decline; however this could provide supervisors with early warning indicators before it is too late, thus allowing for pre-emptive action to be taken.
+
+Under the multip step approach, the additional set of features would look something like follows;
+
+```{r extensions, include=TRUE, warning=FALSE, message=FALSE, echo=FALSE, eval = TRUE}
+
+library(data.table)
+library(stargazer)
+basePath = file.path("//researchhub/files/May/Credit Union Failure/SRDDfolder")
+
+# source data from files
+dataRaw = data.table:: fread(file.path(basePath, "appdatawin.csv"), stringsAsFactors = FALSE)
+
+#select columns to keep
+cols = colnames(dataRaw)[which(!grepl(pattern = paste0(c("FRN", "firm", "year"), collapse = "|"), x = colnames(dataRaw), ignore.case = TRUE))]
+#prepare data 
+dataClean = dataRaw[, match(cols, colnames(dataRaw)), with = FALSE]
+
+y <- dataClean[, c("DEFAULT","failurel1","failurel2", "failurel3","failurel4"), with = FALSE]
+head(y)
+
+
+```
+
+### Model tuning 
+
+The models explored in this exercise peform relatively in predicting credit union defaults when accounting for supervisory preferences between Type I and Type II erros. Model performance could be further enhanced via the application of some of the following techniques;
+
+1. **Regularisation**: This is a smoothing method that introduces a penalty term to the error function acting on non-zero, especially large, parameter values. Its effect is the reduction of the complexity, or the smoothening, of a model. This is useful when faced with an over-fitting model but also for feature selection, which can sometimes be problematic in neural networks. 
+
+2. **Bagging**: A popular method for improving an estimator’s properties. The idea is that, when aggregating (averaging) the outputs of many estimators, one reduces the variance of the full model. When over-fitting is an issue, as for tree
+models, bagging is likely to improve performance. 
+
+3. **Boosting**: Describes a set of methods which transform, or boost, a weak learner into a strong one (model). This means that one iteratively applies models to the data which individually have weak generalisation properties, but the final ensemble of models generalises well.
+
+4. **Simulated data**, which involves creating synthetic data of the minority class (`DEFAULT = 1`) to help rebalance the minority class. This could be achieved with the help of supervisor’s specialist knowledge of the entities themselves and the associated risks. The result could be better out of sample predictive performance as the model has 'seen' more instances of what a `DEFAULT` looks like and is therefore more likely to be able to identify future instances.
+
+
+## Source Code
+
+All code can be found on the git repository here [CreditUnionFailureML](https://almplatform/tfs/UnmanagedCollection/ProjRDG/_git/CreditUnionFailureML). The code snippits below outline the steps taken in conducting this analysis, from data preperation, model fitting, cross-validation, performance evaluation and testing. 
+
+Below is the list of helper functions created to support the analysis. 
+
+```{r Functions, include=TRUE, warning=FALSE, message=FALSE, echo=TRUE, eval = FALSE}
+
+# helper funs
+
+#' @title BOE colour pallete used for charting  
+
+boe_cols <- c(
+  red            = "#A51140",
+  black          = "#1E1E1E",
+  stone          = "#CAC0B6",
+  dark_teal      = "#005E6E",
+  dark_blue      = "#002A42",
+  plum           = "#752864",
+  mid_blue       = "#165788",
+  maroon         = "#6C0721",
+  purple         = "#4E3780",
+  grey           = "#999999",
+  green          = "#006663", 
+  orange         = "#D55E00", 
+  orange2        = "#E69F00", 
+  blue           = "#56B4E9")
+
+MakeROCPlot <- function(data, modelType, title){
+  
+  ModelAccuracy %>% 
+    dplyr:: filter(imbalanceMethod ==  paste0(modelType)) %>% 
+    yardstick:: roc_curve(truth, .pred_1) %>%
+    ggplot2:: ggplot(aes(x = 1 - specificity, y = sensitivity, fill = paste0(modelType), group = "1")) +
+    ggplot2:: geom_path(aes( colour = unname(boe_cols)[1]), show.legend = F, lwd =2) +
+    ggplot2:: geom_abline(lty = 4, colour = unname(boe_cols)[3], show.legend = FALSE, lwd = 2) +
+    ggplot2:: scale_colour_manual(values = rep(unname(boe_cols),1)) + 
+    ggplot2:: coord_equal() +
+    ggplot2:: theme_minimal(base_size = 16) + 
+    ggplot2:: labs(subtitle = paste0(title)) 
+  
+  
+}
+
+
+PrepForRecipe <- function(df, ...){
+  
+  for(i in 2:nrow(df)) {
+    
+    if((nrow(df) %% i) == 0) {
+      
+      i
+      
+      break()
+      
+    }
+    
+  }
+
+  df <- df[,which(!colnames(df) %in% c("FRN","FirmName", "Year"))]
+  
+  df$DEFAULT <- as.factor(df$DEFAULT)
+  
+  return(df)
+  
+}
+
+simple_recipe <- function(df){
+  
+  recipe(Raise ~ ., data = df) %>%
+    step_center(all_numeric()) %>%
+    step_scale(all_numeric()) %>%
+    step_dummy(all_nominal(),-Raise) %>% 
+    step_upsample(Raise, ratio = 0.5)
+  
+  
+}
+
+yncount <- function(df){
+  
+  y <- countraise(df, "Yes") 
+  
+  print(y)
+  
+  n <- countraise(df, "No") 
+  
+  print(n)
+  
+} 
+
+##Function to obtain the perdicted class from the model and test data along with
+
+#Probabilty scores.
+predictAndProb <- function(model, testData,imbalanceMethod){
+  
+  pred_raw = predict(model, new_data = testData,  type = "raw")
+  pred_probs = predict(model, new_data = testData,type = "prob") 
+  pred_class = predict(model, new_data = testData, type = "class")
+  
+  #Building the predictions of the model and the data with probablity
+  predictions = tibble:: tibble(truth = testData$DEFAULT, predicted = pred_class$.pred_class) %>% 
+    cbind(pred_probs) %>% 
+    dplyr:: mutate(imbalanceMethod = imbalanceMethod)
+  
+  return(as_tibble(predictions))
+}
+
+##Code that extracts performance metrics after running the model, this is a single
+#model not one that is cross validated.
+
+modelResults <- function(model, testData, type){
+  
+  modelAccuracy <- predictAndProb(model, testData, type)
+  
+  confMatrix <- yardstick:: conf_mat(modelAccuracy, truth, predicted)
+  confMatrixStats <- summary(confMatrix)
+  auc <- yardstick:: roc_auc(modelAccuracy, truth, .pred_1)
+
+  modelStats <- rbind(confMatrixStats, auc) %>% dplyr:: mutate(type = type)
+  
+  plot <- modelAccuracy %>% 
+    yardstick:: roc_curve(truth, .pred_1) %>% 
+    autoplot
+  
+  return(
+  list(confMatrix = confMatrix, 
+       modelStats = modelStats,
+       modelAccuracy = modelAccuracy,
+       plot = plot)
+  )
+}
+
+
+#------------------------------------------------------------------------------
+
+
+trainControlSample <- function(traindata, testdata, samplingMethod, method, resamplingmethod, numberFolds = 10, repeats = 5){
+  
+  ctrl <- trainControl(method = paste0(resamplingmethod), number = numberFolds, verboseIter = FALSE,  repeats = repeats, sampling = paste0(samplingMethod))
+  
+  set.seed(42)
+  model_trained <- caret::train(DEFAULT ~ .,
+                                data = traindata,
+                                method = paste0(method),
+                                #preProcess = c("scale", "center"),
+                                trControl = ctrl)
+  
+  finalPreds <- data.frame(actual = testdata$DEFAULT, predict(model_trained, newdata = testdata, type = "prob"))
+  
+  finalPreds$predict <- as.factor(ifelse(finalPreds$X1 > 0.5, 1, 0))
+  cm_over <- confusionMatrix(finalPreds$predict, testdata$DEFAULT) 
+  
+  Results <- data.table:: data.table(cm_over$byClass)
+  colnames(Results)[1] = "Position"
+  Results <- Results[, `:=`(Meausure = names(cm_over$byClass), 
+                            resamplingmethod = paste0(resamplingmethod), 
+                            samplingMethod = paste0(samplingMethod), 
+                            modeltype = paste0(method))]
+  
+  return(list(Results, cm_over$table))
+  
+  
+}
+
+```
+
+### Chapter 2 
+
+The code below shows steps taken in preparing the data for the analysis as discussed in [Chapter 2](#modelsetup). This includes reading the data, transforming the data to be structured for a machine learning problem and outputting the summary statistics. 
+
+```{r dataprepcode1, include=TRUE, warning=FALSE, message=FALSE, echo=TRUE, eval = FALSE}
+
+library(tidyverse)
+library(data.table)
+library(stargazer)
+
+basePath = file.path("//researchhub/files/May/Credit Union Failure/SRDDfolder")
+
+# source data from files
+dataRaw = data.table:: fread(file.path(basePath, "appdatawin.csv"), stringsAsFactors = FALSE)
+
+#select columns to keep
+cols = colnames(dataRaw)[which(!grepl(pattern = "failure", x = colnames(dataRaw), ignore.case = TRUE))]
+#prepare data 
+dataClean = dataRaw[, match(cols, colnames(dataRaw)), with = FALSE][, FirmName := Firm.Name.x][,-"Firm.Name.x"]
+
+variables<-c("roa", "pctarrears", "loandeposit", "simplecapitalratio",
+             "provlns", "logassets", "unsecassets", "CY_30E", "arrears312", "arrearsg12",
+             "CPI", "GDP.Growth.Quarter.Last.Year", "Base.Rate", "Regunemployment")
+
+y <- dataClean[, variables, with = FALSE]
+
+colnames(y)<- c("Return on Assets (%)","Arrears rate (%)", "Loan-deposit ratio (%)", "Risk-adjusted capital ratio (%)",  "Provisions-loans ratio (%)", paste0("Log assets(", "\u00A3", ")"), "Unsecured loans to assets (%)", "Capital ratio (%)", "Arrears < 12 Months (%)", "Arrears > 12 Months (%)", "Inflation (%, CPI)", "GDP Growth (Quarterly, %)",  "Bank Rate (%)", "Regional Unemployment Rate (%)")
+
+stargazer:: stargazer(y, title="Summary Statistics", type="html", out = "./Outputs/summarystats.html", digits=1)
+
+#--------------------------------------------------------------------------------------------------------------------------
+
+
+```
+
+The code below shows steps taken in preparing the data for machine learning classifiers as discussed in [Chapter 2](#modelsetup). This includes creating the training and test splits. 
+
+```{r dataprepcode2, include=TRUE, warning=FALSE, message=FALSE, echo=TRUE, eval = FALSE}
+
+variables<-c("FRN", "FirmName", "Year", "DEFAULT", "roa", "pctarrears", "loandeposit", "simplecapitalratio",
+             "provlns", "logassets", "unsecassets", "CapitalRatio", "arrears312", "arrearsg12",
+             "CPI", "GDP.Growth.Quarter.Last.Year", "Base.Rate", "Regunemployment")
+
+DataML <- dataClean[, variables, with = FALSE]
+DataML <- na.omit(DataML)
+
+# prepare data for ML analysis
+DataML <- PrepForRecipe(as.data.frame(DataML))
+nrow_DataML <- tibble:: tibble(`Before Split` = nrow(DataML))
+
+set.seed(12345)
+train_test_split <- rsample:: initial_split(DataML, prop = 0.7)
+train <- rsample:: training(train_test_split) # create training set 
+test <- rsample:: testing(train_test_split) # create test set 
+
+nrow_train_data <- tibble:: tibble(`Training set` = nrow(train))
+nrow_test_data <- tibble:: tibble(`Test set` = nrow(test))
+
+table <- cbind(nrow_DataML, nrow_train_data, nrow_test_data)
+kableExtra:: kable(table, caption = "Training and test sets") %>% 
+  kableExtra:: kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F, position = "left")
+
+```
+
+The final step before the models are fitted is the prep-processing and standardisation of the data, which is shown below. 
+
+```{r, include=TRUE, warning=FALSE, message=FALSE, echo=FALSE, eval=TRUE}
+
+#---------------------------------------------------------------------------------------
+# Create 'recipe' for pre-processing input data, and apply to one example split of data --------
+
+simple_recipe <- function(dataset){
+  
+  recipes:: recipe(DEFAULT ~ ., data = dataset) %>%
+    recipes:: step_center(all_numeric()) %>%
+    recipes:: step_scale(all_numeric()) %>%
+    recipes:: step_dummy(all_nominal(),- DEFAULT) %>%  
+    recipes:: step_upsample(DEFAULT, ratio = 0.5) # this step rebalances the data 
+  
+}
+
+train_recipe <- recipes:: prep(simple_recipe(train), training = train, retain = TRUE) # prepare data model, apply processing steps
+train_data <- train_recipe %>% juice  # generate training set 
+test_data <- recipes:: bake(train_recipe, new_data = test) # generate test set 
+
+table <- rbind(c(CountDefaultsTrain = sum(train_data$DEFAULT == 1), CountNonDefaultsTrain = sum(train_data$DEFAULT == 0)), 
+               c(CountDefaultsTest = sum(test_data$DEFAULT == 1), CountNonDefaultsTest = sum(test_data$DEFAULT == 0)))
+
+rownames(table) <- c("training data", "test data")
+
+
+```
+
+### Chapter 3 
+
+The first step is to fit the models, using a set of classifiers identified in this paper as discussed in [Chapter 3.3](#modelfit). The first is the logistic case, which is fitted as follows;
+
+```{r, include=TRUE, warning=FALSE, message=FALSE, echo=TRUE, eval = FALSE}
+
+#---------------------------------------------------------------------------------------
+# fit logistic model using parsnip logistic_reg function, fit using training data 
+logisticModel <- parsnip:: logistic_reg(mode = "classification", penalty = "glm") %>% 
+  parsnip:: set_engine("glm") %>%
+  parsnip:: fit(DEFAULT ~ ., data = train_data)
+
+#obtain model results using function (see annex for details) applying to the test data 
+logisticModelResults <- modelResults(logisticModel, testData = test_data, "logisticModel")
+
+
+```
+
+The next step is to fit all the classifiers to the data. The code below shows the implemtation of fitting eight models to the credit union data. Note LDA, ANN and Naive Bayes are not included in the `parnsip` packages, so packages purposely build for applying these alogrithms are used, which also changes the way we collect the performance stats in the next section. 
+
+```{r fitmodel1, include=TRUE, warning=FALSE, message=FALSE, echo=FALSE, eval = FALSE}
+
+#---------------------------------------------------------------------------------------
+# fit random forst model using parsnip rand_forest function, fit using training data 
+randomForest <- parsnip:: rand_forest(mtry = 10, trees = 150, min_n = 6, mode = "classification") %>% 
+                parsnip:: set_engine("randomForest") %>%
+                parsnip:: fit(DEFAULT ~ ., data = train_data)
+
+# run boosted trees alogrithm and test performance 
+boostedTree <- parsnip:: boost_tree(mtry = 10, trees = 100, min_n = 6, mode = "classification") %>% 
+  parsnip:: set_engine("xgboost", importance = 'impurity') %>%
+  parsnip:: fit(DEFAULT ~ ., data = train_data)
+
+# run decision tree and test model performance  
+decisionTree <- parsnip:: decision_tree(mode = "classification", cost_complexity = 10, min_n = 6) %>% 
+  parsnip:: set_engine("C5.0", importance = 'impurity') %>%
+  parsnip:: fit(DEFAULT ~ ., data = train_data)
+
+# run KNN model 
+KNNmodel <- parsnip:: nearest_neighbor(mode = "classification",neighbors = 10) %>% 
+  parsnip:: set_engine("kknn", importance = 'impurity') %>%
+  parsnip:: fit(DEFAULT ~ ., data = train_data)
+
+# run SVM models
+SVMmodel <- parsnip:: svm_rbf(mode = "classification", rbf_sigma = 0.2) %>% 
+  parsnip:: set_engine("kernlab", importance = 'impurity') %>%
+  parsnip:: fit(DEFAULT ~ ., data = train_data)
+
+# run LDA models
+LDAModel <- MASS:: lda(DEFAULT ~ ., data = train_data) 
+
+# run naive bayes models
+NaiveBayesModel <- e1071:: naiveBayes(DEFAULT ~ ., data = train_data) 
+
+# run neural network model with tuning gride
+tuning.grid <- expand.grid(.size=1:6, .decay=0, .bag=FALSE)  
+NeuralNetModel.tuned <- caret:: train(DEFAULT ~ ., data = train_data, method="avNNet", trace=FALSE, tuneGrid=tuning.grid, linout=TRUE, repeats=1)
+
+
+```
+
+
+The code below shows the model performance analysis used in [Chapter 3.3](#modelfit). 
+
+```{r modelresultscode1, include=TRUE, warning=FALSE, message=FALSE, echo=TRUE, eval = FALSE}
+
+#---------------------------------------------------------------------------------------
+# Output models results using parnsip ouputs (RF, BT, DT, KNN, SVM)
+randomForestResults <- modelResults(randomForest, testData = test_data, "RandomForest")
+boostedTreeResults <- modelResults(boostedTree, testData = test_data, "boostedTree")
+decisionTreeResults <- modelResults(decisionTree, testData = test_data, "decisionTree")
+KNNTreeResults <- modelResults(KNNmodel, testData = test_data, "KNN")
+SVMResults <- modelResults(SVMmodel, testData = test_data, "SVM")
+
+#---------------------------------------------------------------------------------------
+# Output models results using LDA
+pred_raw = predict(LDAModel,test_data, type = "raw")
+pred_probs = predict(LDAModel, test_data, type = "prob") 
+pred_class = predict(LDAModel, test_data,type = "class")
+
+###Building the predictions of the model and the data with probablity
+predictions = tibble:: tibble(truth = test_data$DEFAULT, predicted = pred_class$class) 
+LDAconfMatrix <- yardstick:: conf_mat(predictions, truth, predicted)
+LDAconfMatrixStats <- summary(LDAconfMatrix)
+auc <- yardstick:: roc_auc(ModelAccuracy , as.factor(truth), class)
+LDAmodelStats <- rbind(LDAconfMatrixStats, auc) %>% dplyr:: mutate(type = "LDA")
+
+#---------------------------------------------------------------------------------------
+# Output models results using naive bayes
+pred_raw = predict(NaiveBayesModel,test_data, type = "raw")
+pred_class = predict(NaiveBayesModel, test_data,type = "class")
+
+##Building the predictions of the model and the data with probablity
+predictions = tibble:: tibble(truth = test_data$DEFAULT, predicted = pred_class)
+
+NaiveBayesconfMatrix <- yardstick:: conf_mat(predictions, truth, predicted)
+NaiveBayeconfMatrixStats <- summary(NaiveBayesconfMatrix)
+NaiveBayeauc <- yardstick:: roc_auc(ModelAccuracy , as.factor(truth), class)
+NaiveBayemodelStats <- rbind(NaiveBayeconfMatrixStats, NaiveBayeauc) %>% dplyr:: mutate(type = "NaiveBayes")
+
+#---------------------------------------------------------------------------------------
+# Output models results using neurol networks 
+
+pred_raw = predict(NeuralNetModel.tuned, test_data, type = "raw")
+pred_class = predict(NeuralNetModel.tuned, test_data,type = "prob")
+
+class <- as.data.frame(pred_class) %>% dplyr:: mutate(class = if_else(`0` > `1`, 0, 1), class = as.factor(class)) %>% dplyr:: select(class)
+
+colnames(class)[1] <- "class"
+##Building the predictions of the model and the data with probablity
+predictions = tibble:: tibble(truth = test_data$DEFAULT, predicted = class$class) 
+
+ModelAccuracy <- tibble:: as_tibble(predictions) %>% dplyr:: mutate_if(is.factor, as.numeric)
+NeuralNetModelconfMatrix <- yardstick:: conf_mat(predictions, truth, predicted)
+NeuralNetModelconfMatrixStats <- summary(NeuralNetModelconfMatrix)
+NeuralNetModelauc <- yardstick:: roc_auc(ModelAccuracy , as.factor(truth), predicted)
+NeuralNetModelmodelStats <- rbind(NeuralNetModelconfMatrixStats, auc) %>% dplyr:: mutate(type = "NeuralNetwork")
+
+
+```
+
+Once the performance has been evaluated, four classifiers are taken forward for further analysis. The first step is the re-apply the preprocessing step of up-sampling, as this is implemented in the cross-validation process. This is shows in the code chunk below;
+
+
+```{r recipe1, include=TRUE, warning=FALSE, message=FALSE, echo=FALSE, eval = FALSE}
+
+#---------------------------------------------------------------------------------------
+# prepare training and test data without upsampling 
+
+simple_recipe <- function(dataset){
+  recipes :: recipe(DEFAULT ~ ., data = dataset) %>%
+    recipes:: step_center(all_numeric()) %>%
+    recipes:: step_scale(all_numeric()) %>%
+    recipes:: step_dummy(all_nominal(),- DEFAULT) 
+}
+
+train_recipe <- recipes:: prep(simple_recipe(train), training = train, retain = TRUE)
+train_data <- train_recipe %>% juice 
+test_data <- recipes:: bake(train_recipe, new_data = test) 
+
+
+```
+
+The next step is to apply different rebalncing methods to understand which performs the best in terms of predictive performace on the test data. 
+
+```{r rebalancePerformance1, include=TRUE, warning=FALSE, message=FALSE, echo=FALSE, eval = FALSE}
+
+method = c("up", "down", "smote", "rose")
+
+ModelPerformance <- lapply(X = c("up", "down", "smote", "rose"),  
+                           FUN = trainControlSample, 
+                           method = "nb", 
+                           resamplingmethod = "boot",
+                           traindata = train_data, 
+                           testdata = test_data, 
+                           numberFolds = 10) 
+
+data <- ModelPerformance %>% purrr:: map(1) %>% purrr:: invoke(rbind, .)
+
+rebalancePerformance <- tidyr:: spread(data, key = Meausure, value = Position)
+
+
+```
+
+Once the upsampling method is chosen as the best rebalancing method, the best classifiers are put forward for cross validation as shown below. 
+
+```{r rebalancePerformance2, include=TRUE, warning=FALSE, message=FALSE, echo=FALSE, eval = FALSE}
+
+modeltypes = c("lda", "plr", "nb", "nnet")
+
+ModelPerformance <- lapply(X = modeltypes, FUN = trainControlSample, resamplingmethod = "boot", samplingMethod = "up", 
+    traindata = train_data, testdata = test_data, numberFolds = 5)
+
+data <- ModelPerformance %>% purrr::map(1) %>% purrr::invoke(rbind, .)
+
+rebalancePerformance <- tidyr::spread(data, key = Meausure, value = Position)
+
+
+```
+
+### Chapter 4 
+
+The code below shows the model performance analysis used in [Chapter 4](#cv). 
+
+```{r cvresultscode, include=TRUE, warning=FALSE, message=FALSE, echo=TRUE, eval = FALSE}
+
+#---------------------------------------------------------------------------------------------------
+# model performance over resampling methods (k fold - e..g bootstrapping, repeated cv)
+resamplingmethods <- c("boot", "boot632", "optimism_boot", "boot_all", "cv", "repeatedcv", "LGOCV")
+
+ModelPerformance <- lapply(X = resamplingmethods, 
+                           FUN = trainControlSample,  
+                           data = test_data, 
+                           numberFolds = 10, 
+                           samplingMethod = "up", 
+                           method = "lda") %>%  
+  data.table:: rbindlist()
+
+ModelPerformance <- tidyr:: spread(ModelPerformance, key = Meausure, value = Position)
+
+#-------------------------------------------------------------------------------
+# model performance over rebalancing methods 
+rebalancingMethods <- c("up", "down", "smote", "rose")
+
+ModelPerformance <- lapply(X = rebalancingMethods,  
+                           FUN = trainControlSample, 
+                           method = "lda", # can apply for others including nb and nnet
+                           resamplingmethod = "boot", #best performing 
+                           traindata = train_data, 
+                           testdata = test_data, 
+                           numberFolds = 10) 
+
+data = ModelPerformance %>% purrr:: map(1) %>% purrr:: invoke(rbind, .)
+
+rebalancePerformance <- tidyr:: spread(data, key = Meausure, value = Position)
+
+#-------------------------------------------------------------------------------
+# model performance over model type
+modeltypes <- c("lda", "glm", "nb", "nnet")
+ModelPerformance <- lapply(X = modeltypes, 
+                           FUN = trainControlSample, 
+                           resamplingmethod = "boot", #best performing 
+                           samplingMethod = "up", #best performing 
+                           traindata = train_data, 
+                           testdata = test_data,
+                           numberFolds = 5) 
+  
+
+AllModels <- ModelPerformance %>% purrr:: map(1) %>% purrr:: invoke(rbind, .) %>% tidyr:: spread(key = Meausure, value = Position)
+
+ConfusionMatrices <- ModelPerformance %>% purrr:: map(2) #%>% purrr:: invoke(rbind, .)
+
+
+
+```
+
+The code below shows steps taken to cross-validate and tune the neural network model 
+
+```{r neuralcvcode, include=TRUE, warning=FALSE, message=FALSE, echo=TRUE, eval = FALSE}
+library(doParallel) #parallelize code for rfe algorithm
+
+cl <- makeCluster(detectCores(), type='PSOCK')
+registerDoParallel(cl)
+
+#--------------------------------------------------------------------------------------
+
+fitControl <- trainControl(
+  method = "repeatedcv", # resampling method
+  number = 5, # k = 5 folds
+  repeats = 5, 
+  sampling = "up") # repeats 
+
+tune.grid.neuralnet <-  expand.grid(size = seq(from = 1, to = 20, by = 2),
+                                    decay = seq(from = 0.1, to = 1, by = 0.1))
+
+nrow(tune.grid.neuralnet)
+
+set.seed(825)
+
+nnetFit <- caret:: train(DEFAULT ~ ., data = train_data, 
+                         method = "nnet", 
+                         trControl = fitControl, 
+                         verbose = FALSE, 
+                         ## Now specify the different degrees of freedom to apply 
+                         tuneGrid = tune.grid.neuralnet)
+
+
+```
+
+### Chapter 5 
+
+The code below shows the steps taken to carry out feature importance analysis in [Chapter 5](#cv). 
+
+```{r featureimpcode, include=TRUE, warning=FALSE, message=FALSE, echo=TRUE, eval = FALSE}
+
+load(file.path(basePath, "./Outputs/nnetFit.RData"))
+#compute variable importance 
+importance <- caret:: varImp(nnetFit, scale=FALSE)
+# summarize importance
+print(importance)
+
+data <- tibble:: tibble(Importance = round(importance$importance$Overall, 1), Feature = row.names(importance$importance))
+colnames(data) <- c("Importance", "Feature")
+
+control <- caret:: trainControl(method="repeatedcv", number=10, repeats=3)
+model <- caret:: train(DEFAULT ~ ., data= train_data, method="nnet", trControl=control)
+
+imp<-varImp(model)
+plot(imp)
+
+#----------------------------------------------------------------------------------
+# define the control using a random forest selection function
+library(doParallel) #parallelize code for rfe algorithm
+
+cl <- makeCluster(detectCores(), type='PSOCK')
+registerDoParallel(cl)
+
+control <- caret:: rfeControl(functions=rfFuncs, method="cv", number=10)
+# run the RFE algorithm
+results <- caret:: rfe(DEFAULT~.,data = train_data, sizes=c(1:8), rfeControl=control)
+save(results, file =  "./Outputs/RDEresults.RData")
+
+# plot the results
+ggplot2:: ggplot(results, type=c("g", "o")) + 
+  ggplot2:: geom_line(colour= "#A51140", size=1)  +
+  ggplot2:: theme_minimal() + 
+  ggplot2:: labs(title="", 
+                 subtitle="Chart 5: Relative feature importance", y = "Importance", x = NULL) +
+  ggplot2:: coord_flip() + 
+  ggplot2:: theme_minimal(base_size = 16) +     
+  ggplot2:: theme(
+    panel.grid.major.x = element_blank(),
+    panel.border = element_blank(),
+    axis.ticks.x = element_blank(), 
+    panel.grid.major = element_blank()) 
+
+
+```

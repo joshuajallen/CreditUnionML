@@ -1,0 +1,115 @@
+---
+title: "Skills Dashboard"
+output:
+  rmdformats::readthedown:
+    highlight: kate
+    code_folding: show
+    thumbnails: true
+    gallery: true
+    fig_width: 10
+    fig_height: 8
+    df_print: kable
+---
+```{r setupDashboard, include=FALSE}
+
+## Global options
+options(max.print = "75")
+knitr::opts_chunk$set(echo = TRUE,
+	             cache = FALSE,
+               prompt = FALSE,
+               tidy = TRUE,
+               comment = NA,
+               message = FALSE,
+               warning = FALSE )
+knitr::opts_knit$set(width = 100, highr.opts = 75, self.contained = TRUE)
+
+```
+
+# Feature importance {#feature}
+
+This section explores the overall feature importance in the model. Neural networks and other machine learning models are often referred to as 'black box' models. This is because these models lack explicability and interpretability, since the layers and operations applied in the algorithms are not visible or easy to understand. This is sometimes hard look past, especially in the case of firm supervision.
+
+The relative importance of individual features can give end-users a better understanding of a model’s output. It is important to understand the source of the classifications, namely the default classes `DEFAULT = 1`, in the context of the data. One approach to understanding the contribution of a feature in a model is to observe the amount by which the inclusion or exclusion of a feature changes the performance.
+
+Chart 5 shows the relative importance of the features, based on the ANN fitted in [Section 3](#cv). 
+
+```{r , include=TRUE, warning=FALSE, message=FALSE, echo=TRUE, eval = T}
+
+importance <- caret:: varImp(nnetFit, scale=FALSE)
+# summarize importance
+print(importance)
+
+```
+
+```{r , include=TRUE, warning=FALSE, message=FALSE, echo=FALSE, eval = TRUE}
+
+data <- tibble:: tibble(Importance = round(importance$importance$Overall, 1), Feature = row.names(importance$importance))
+colnames(data) <- c("Importance", "Feature")
+
+ggplot2:: ggplot(data, aes(x=reorder(Feature, Importance), y= Importance, label=Importance)) + 
+  ggplot2:: geom_point(stat='identity', fill= "#A51140", size=12)  +
+  ggplot2:: geom_segment(aes(y = 0, 
+                   x = Feature, 
+                   yend = Importance, 
+                   xend = Feature), 
+               color = "#A51140") +
+  ggplot2:: geom_text(color="white", size=3) + 
+  ggplot2:: labs(title="", 
+       subtitle="Chart 5: Relative feature importance", y = "Importance", x = NULL) +
+  ggplot2:: coord_flip() + 
+  ggplot2:: theme_minimal(base_size = 16) +     
+  ggplot2:: theme(
+    panel.grid.major.x = element_blank(),
+    panel.border = element_blank(),
+    axis.ticks.x = element_blank(), 
+    panel.grid.major = element_blank()) 
+
+```
+
+Chart 5 shows that unsecured assets, unemployment, loan to deposit ratio and log assets are the most important features in the model. This illustrates the pronounced effects of unemployment and the importance considering macroeconomic as well as microeconomic factors. Note that the number of features doesn’t have to be the same as the explanatory predictors. Adding an interactional or functional set of features can capture other complexities in the data. By doing so it may be possible to enhance predictive performance by enriching the dataset. In some cases the data is not separable when presented in its raw form; however when re-engineered, features can help distinguish between the classes and, so, improve the classifier accuracy.
+
+Recursive Feature Elimination (RFE) is a feature selection method that fits a model and removes the weakest feature. The method uses Random Forest algorithm to evaluate the model, which is configured to explore all possible subsets of the attributes [@brownlee2014]. The results of the RFE are shown below in Chart 6.
+
+
+```{r , include=TRUE, warning=FALSE, message=FALSE, echo=TRUE, eval = FALSE}
+
+# define the control using a random forest selection function
+control <- caret:: rfeControl(functions=rfFuncs, method="cv", number=10)
+# run the RFE algorithm
+results <- caret:: rfe(DEFAULT~.,data = train_data, sizes=c(1:8), rfeControl=control)
+# summarize the results
+print(results)
+
+```
+
+```{r , include=TRUE, warning=FALSE, message=FALSE, echo=FALSE, eval = TRUE}
+
+load(file.path(basePath, "./Outputs/RDEresults.RData"))
+# plot the results
+ggplot(results) + 
+  #ggplot2:: geom_line(colour= "#A51140", size=1.2) + 
+
+  ggplot2:: theme_minimal() + 
+  ggplot2:: labs(title="", 
+                 subtitle="Chart 6: Recursive Feature Elimination Selection", y = "Accuracy", x = "Number of Variables") +
+  #ggplot2:: coord_flip() + 
+  ggplot2:: theme_minimal(base_size = 16) +     
+  ggplot2:: theme(
+    panel.grid.major.x = element_blank(),
+    panel.border = element_blank(),
+    axis.ticks.x = element_blank(), 
+    panel.grid.major = element_blank()) +
+  ggplot2:: scale_y_continuous(breaks = scales:: pretty_breaks(n = 10))  +
+  ggplot2:: scale_x_continuous(breaks = scales:: pretty_breaks(n = 10))
+
+```
+
+Chart 6 implies that the optimal number of features is six. The most ‘important’ features in the data under RFE are displayed below. Note this is broadly in agreement with results displayed in Chart 5.
+
+```{r , include=TRUE, warning=FALSE, message=FALSE, echo=FALSE, eval = TRUE}
+
+print(results$optVariables)
+
+```
+
+

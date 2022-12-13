@@ -1,0 +1,48 @@
+@font-face {
+  font-family: "Bliss Pro", "BlissWeb", "Trebuchet MS", "Lucida Grande", "Lucida Sans", Tahoma, sans-serif;
+  font-style: normal;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+    font-weight: 300;
+    color: #626262;
+    line-height: 1.5;
+    margin: 0;
+    padding: 0;
+    background-color: #fffffe;
+}
+
+h1 {
+    color: #2f4f5b;
+    font-size: 3.3em;
+    line-height: 1.2;
+    margin: 0 0 .25em 0;
+    display: block;
+    font-weight: bold;
+}
+
+h2 {
+    color: #2f4f5b;
+    font-size: 2em;
+    line-height: 1.2;
+    margin: 0 0 .25em 0;
+}
+
+h3 {
+    color: #cf395c;
+    font-size: 1.22em;
+    line-height: 1.25;
+    font-weight: 500;
+    margin: 0 0 .5em 0;
+    display: block;
+}
+
+ul {
+    list-style: circle;
+    padding: 0 0 0 20px;
+    margin: 0 0 20px 0;
+}

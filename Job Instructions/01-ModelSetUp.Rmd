@@ -1,0 +1,110 @@
+---
+title: "Model Set Up"
+output:
+  rmdformats::readthedown:
+    highlight: kate
+    code_folding: show
+    thumbnails: true
+    gallery: true
+    fig_width: 10
+    fig_height: 8
+    df_print: kable
+---
+
+```{r setupData, include=FALSE}
+
+## Global options
+options(max.print = "75")
+knitr::opts_chunk$set(echo = TRUE,
+	             cache = FALSE,
+               prompt = FALSE,
+               tidy = TRUE,
+               comment = NA,
+               message = FALSE,
+               warning = FALSE, 
+	             fig.width=10, fig.height=8)
+knitr::opts_knit$set(width = 100, highr.opts = 75, self.contained = TRUE)
+
+```
+
+# Data Preparation {#modelsetup}
+
+In this chapter the data is prepared, which includes pre-processing and 'rebalancing' the `DEFAULT` class. First the training set and test set are generated on the basis of random sampling, with the split set to be 70% training and 30% test (`p = 0.7`). A relatively large proportion of the data is kept back for testing, which is due to the class imbalances, requiring a larger portion of the data for evaluation purposes. The steps taken to prepare the training and test sets for the model are shown below, with the results displayed in Table 2. 
+
+```{r, include=TRUE, warning=FALSE, message=FALSE, echo=TRUE}
+
+variables<-c("Year", "DEFAULT", "roa", "pctarrears", "loandeposit", "simplecapitalratio",
+             "provlns", "logassets", "unsecassets", "CapitalRatio", "arrears312", "arrearsg12",
+             "CPI", "GDP.Growth.Quarter.Last.Year", "Base.Rate", "Regunemployment")
+
+DataML <- dataClean[, variables, with = FALSE]
+DataML <- na.omit(DataML)
+
+# prepare data for ML analysis
+DataML <- PrepForRecipe(as.data.frame(DataML))
+nrow_DataML <- tibble:: tibble(`Before Split` = nrow(DataML))
+
+set.seed(12345)
+train_test_split <- rsample:: initial_split(DataML, prop = 0.7)
+train <- rsample:: training(train_test_split) # create training set 
+test <- rsample:: testing(train_test_split) # create test set 
+
+nrow_train_data <- tibble:: tibble(`Training set` = nrow(train))
+nrow_test_data <- tibble:: tibble(`Test set` = nrow(test))
+
+table <- cbind(nrow_DataML, nrow_train_data, nrow_test_data)
+kableExtra:: kable(table, caption = "Training and test sets") %>% 
+  kableExtra:: kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F, position = "left")
+```
+
+As mentioned, the credit union data is heavily imbalanced. To rebalance the data, up-sampling is applied in addition to data pre-processing, which replicates rows of a data set to make the occurrence of levels in a specific class more balanced. Down-sampling was also considered, whereby the majority class is sampled and removed from the data. There are more sophisticated rebalancing methods, such as generating synthetic data from the minority class (SMOTE) to increase its cardinality, which will be explored in [Chapter 4](#cv). 
+
+Pre-processing refers to the transformations applied to our data before running the models. The features undergo the following steps;
+
+* `step_center` - normalizes (numeric) variables to have mean zero
+* `step_scale` - normalizes variables to have standard deviation one
+* `step_dummy` - creates dummy variables from factor levels
+* `step_upsample` - rebalances the data by up-sampling the `DEFAULT` class observations.
+
+The implementation of this can be found in the [Annex](#annex) with the results shown in Table 3 [@rebecca2019].
+
+```{r, include=TRUE, warning=FALSE, message=FALSE, echo=TRUE, eval=TRUE}
+
+#---------------------------------------------------------------------------------------
+# Create 'recipe' for pre-processing input data, and apply to one example split of data --------
+
+simple_recipe <- function(dataset){
+  
+  recipes:: recipe(DEFAULT ~ ., data = dataset) %>% 
+    
+    recipes:: step_center(all_numeric()) %>% 
+    
+    recipes:: step_scale(all_numeric()) %>% 
+    
+    recipes:: step_dummy(all_nominal(),- DEFAULT) %>% 
+    
+    recipes:: step_upsample(DEFAULT, ratio = 0.5) # this step rebalances the data 
+}
+
+
+train_recipe <- recipes:: prep(simple_recipe(train), training = train, retain = TRUE) # prepare data model, apply processing steps
+train_data <- train_recipe %>% juice  # generate training set 
+test_data <- recipes:: bake(train_recipe, new_data = test) # generate test set 
+
+table <- rbind(c(CountDefaultsTrain = sum(train_data$DEFAULT == 1), CountNonDefaultsTrain = sum(train_data$DEFAULT == 0)), 
+               c(CountDefaultsTest = sum(test_data$DEFAULT == 1), CountNonDefaultsTest = sum(test_data$DEFAULT == 0)))
+
+rownames(table) <- c("training data", "test data")
+
+
+```
+
+```{r, results='asis', include=TRUE, warning=FALSE, message=FALSE, echo=FALSE, eval = TRUE}
+
+stargazer:: stargazer(as.data.frame(train_data),type="html", digits=1, title = "Table 3: Summary Statistics of prep processed training data", 
+                      column.sep.width = "1000pt", font.size = "tiny", align = TRUE
+)
+
+```
+
+Input pre-processing is an important aspect, which may crucially affect a models predictive performance. Several techniques, namely those that combine inputs such as artificial neural networks are highly sensitive to different features. This is addressed via feature standardisation (as above), which allows all features to be compared easily and applied to different model types [@chakraborty2017]. The data is now ready to apply the learning algorithms, which is explored in [Chapter 3](#modelfit). 

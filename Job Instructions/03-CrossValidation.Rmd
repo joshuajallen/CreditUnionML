@@ -1,0 +1,110 @@
+---
+title: "Cross Validation"
+output:
+  rmdformats::readthedown:
+    highlight: kate
+    code_folding: show
+    thumbnails: true
+    gallery: true
+    fig_width: 10
+    fig_height: 8
+    df_print: kable
+---
+
+```{r setupTab, include=FALSE}
+
+## Global options
+options(max.print = "75")
+knitr::opts_chunk$set(echo = TRUE,
+	             cache = FALSE,
+               prompt = FALSE,
+               tidy = TRUE,
+               comment = NA,
+               message = FALSE,
+               warning = FALSE, 
+	             fig.width=10, fig.height=8)
+knitr::opts_knit$set(width = 100, highr.opts = 75, self.contained = TRUE)
+
+```
+
+# Cross Validation {#cv}
+
+## Model Tuning
+
+One way to improve a model is cross-validation (cv), which applies the algorithms over different sets of parameters or degrees of freedom, then comparing the model performance over these sets. K-fold cv is applied to the neural network, whilst varying the degrees of freedom in the model. The model is computed over a tuning grid consisting of the `size` (units in hidden layer) and `decay` (regularization parameter to avoid over-fitting). The set within the tuning grid is selected based on the best out of sample performance, which can be seen below;
+
+```{r , include=FALSE, warning=FALSE, message=FALSE, echo=TRUE, eval = FALSE}
+
+fitControl <- trainControl(
+  method = "repeatedcv", # resampling method
+  number = 5, # k = 5 folds
+  repeats = 5) # repeats 
+
+tune.grid.neuralnet <-  expand.grid(size = seq(from = 1, to = 20, by = 2),
+                                    decay = seq(from = 0.1, to = 1, by = 0.1))
+
+
+set.seed(825)
+nnetFit <- caret:: train(DEFAULT ~ ., data = train_data, 
+                         method = "nnet", 
+                         trControl = fitControl, 
+                         verbose = FALSE, 
+                         ## Now specify the different degrees of freedom to apply 
+                         tuneGrid = tune.grid.neuralnet)
+
+
+```
+
+Chart 4 shows the results of the cv exercise. As measured by overall accuracy, the model performance is maximised for `size = 19` and `decay = 0.1`. 
+
+```{r , include=TRUE, warning=FALSE, message=FALSE, echo=FALSE, eval = TRUE}
+
+load(file.path(basePath, "./Outputs/nnetFit.RData"))
+
+p1 <- ggplot2::ggplot(nnetFit, linemetre)  +
+  ggplot2:: scale_colour_manual(values = rep(unname(boe_cols),1)) + 
+  ggplot2:: theme_minimal(base_size = 16) + 
+  ggplot2:: labs(y = paste0("Accuracy")) 
+
+p2 <- ggplot2:: ggplot(nnetFit, plotType = "level", scales = list(x = list(rot = 90))) + 
+  ggplot2:: theme_minimal(base_size = 16) + 
+  ggplot2:: scale_fill_gradient(low = "white", high = "darkred") 
+
+gridExtra:: grid.arrange(p1, p2, top = grid:: textGrob("Chart 4: Cross validation of neural network model over tuning grid",gp=gpar(fontsize=16,font=3))) #+ ggplot2:: labs(subtitle = paste0("Cross validation of neural network model over tuning grid")) 
+
+```
+
+## Bias-variance trade off 
+
+When it comes to machine learning, there is a trade of between model performance and cost. Basic models with few degrees of freedom (logistic case) are often simple to calculate (low cost); however may lead to poorer model fits and performance (e.g. under-fitting, when there is a non-linear relationship). On the other hand, sophisticated models such as ANN can provide more accurate fits, as demonstrated above but are computationally intensive (cv ANN > 10mins to compute). In addition, complex models with a large number of parameters can lead to overfitting or be subject to a lot of variance (bias-variance trade off) [@brett2019]. The cv process, as demonstrated in [Section 2](#cv) can help calibrate a model’s fit, which in turn can improve predictive performance.
+
+## Overfitting 
+
+ANN have a lot of freedom; however a lack of control over the learning process can lead to overfitting. This is a situation when the neural network is so closely fitted to the training set that it is difficult make accurate out of sample predictions on previously unseen data. When a given method yields a small training error (low cost) but a large test error, then this is a sign of overfitting the data [@daniel2015]. One method to reduce overfitting is regularisation, which introduces a loss function that penalises the model for being too complex [@brownlee2015].
+
+
+## Scalability 
+
+Thus far, only the accuracy of the model has been considered. The scalability of the machine learning algorithm is of importance when implementing such solutions. ANN are computationally intensive and slow to train. The credit union data consists of `~112,000` observations, which is not considered a large-scale database; however even with this modest dataset, cv and feature analysis was time consuming (using parallelisation `doParallel`). It is possible run these algorithms on a local machine; however given the ever growing set of records, one day this may become a problem. Feature selection can be helpful to reduce dimensionality, which selects only the most relevant features, [Chapter 5](#feature). The library 'sparklyr' is a potential solution to this, which is a distributed processing system used for big data workloads. The implementation of this would look something like the following;
+
+
+```{r , include=TRUE, warning=FALSE, message=FALSE, echo=TRUE, eval = FALSE}
+
+sc <- spark_connect(master = "local")
+DataML <- sdf_copy_to(sc, DataML, name = "mtcars_tbl", overwrite = TRUE)
+
+partitions <- DataML %>%
+  sdf_random_split(training = 0.7, test = 0.3, seed = 1111)
+
+training <- partitions$training
+test <- partitions$test
+
+logistic.model <- training %>%
+  ml_logistic_regression(DEFAULT ~  .)
+
+pred <- ml_predict(logistic.model, test)
+
+ml_binary_classification_evaluator(pred)
+
+
+```

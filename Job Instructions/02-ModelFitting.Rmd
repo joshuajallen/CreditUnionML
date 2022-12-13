@@ -1,0 +1,375 @@
+---
+title: "Data Collection""
+output:
+  rmdformats::readthedown:
+    highlight: kate
+    code_folding: show
+    thumbnails: true
+    gallery: true
+    fig_width: 10
+    fig_height: 8
+    df_print: kable
+---
+
+```{r setupTrans, include=FALSE}
+
+## Global options
+options(max.print = "75")
+knitr::opts_chunk$set(echo = TRUE,
+	             cache = FALSE,
+               prompt = FALSE,
+               tidy = TRUE,
+               comment = NA,
+               message = FALSE,
+               warning = FALSE, 
+	             fig.width=10, fig.height=8)
+knitr::opts_knit$set(width = 100, highr.opts = 75, self.contained = TRUE)
+
+```
+
+# Model Fitting {#modelfit}
+
+## Measuring Performance 
+
+In this chapter a set of popular models within the machine learning toolbox are considered. The objective here is to fit an array of models the data (training set) and evaluate each models performance using a set of accuracy measures. The models considered include logistic regression (baseline), naive Bayes, k-nearest neighbours (KNN), tree algorithms, artificial neural networks (ANN), linear discriminant analysis (LDA) and support vector machines (SVM).
+
+Model performance is considered on the basis that a there is an overall relative preference between a Type I error (misclassifying a default, `DEFAULT = 1`) and a Type II error (misclassifying a healthy firm, `DEFAULT = 0`) [@coen2018]. 
+
+Five accuracy measures are used to assess model performance [@brett2019];
+
+* **Accuracy** (poor measure for imbalanced data) - $(TP+TN)/(P + N)$ 
+* **Balanced accuracy** - $(TP/P+TN/N)/2$ 
+* **Sensitivity** (true positive rate) - $TP/(TP + FN)$
+* **Specificity** (true negative rate) - $TN/(TN + FP)$
+* **Receiver Operating Characteristic (ROC)** - sensitivity vs (1 − specificity)
+
+Here there is a trade off from a supervisory perspective in which supervisors are concerned with the elements of the confusion matrix that are of high importance. Firstly, missing credit union defaults, otherwise known as false negatives. Secondly, raising false alarms on viable credit unions and wasting supervisory resources. The first is captured in the **Specificity** of the model, a high **Specificity** means the model is correctly identifying `DEFAULT` classes. The second is captured in the **Sensitivity**, with a lower **Sensitivity** meaning there are a lot of false flags in the predictions. The **ROC** curve is a useful performance measure as the inherent computation shows the trade-off between the benefits. These measures will be considered throughout this analysis to understand how the models are performing relative to one-another. 
+
+## Baseline Logistic Model
+
+First a logistic model is applied to the data to act as a baseline for performance evaluation. Logistic models are used to predict the probability that an observation falls into one of two categories; `DEFAULT = 1` or `DEFAULT = 0` based on a set of predictors (features). The instantiation of the logistic model is given in the [Annex](#annex). 
+
+```{r, include=TRUE, warning=FALSE, message=FALSE, echo=TRUE}
+
+#---------------------------------------------------------------------------------------
+# fit logistic model using parsnip logistic_reg function, fit using training data 
+logisticModel <- parsnip:: logistic_reg(mode = "classification", penalty = "glm") %>% 
+  
+  parsnip:: set_engine("glm") %>%
+  
+  parsnip:: fit(DEFAULT ~ ., data = train_data)
+
+#obtain model results using function (see annex for details) applying to the test data 
+logisticModelResults <- modelResults(logisticModel, testData = test_data, "logisticModel")
+
+
+```
+
+<br /> 
+
+Table 3.1 shows the model performance statistics. Note the accuracy is 91%; however this is not a good measure due to the class imbalances in the data. The balanced accuracy is 71%, whilst the specificity is only around 50%. The interpretation of this is that the logistic model is predicting around half of the `DEFAULT` cases correctly, whilst there are a number of false positives. Remember a supervisor has a relative preference of specificity, whilst minimising the number of false flags. All accuracy measures are computed using the result’s from the confusion matrix in Table 3.1
+
+<br /> 
+
+```{r, include=TRUE, warning=FALSE, message=FALSE, echo=FALSE, eval = TRUE}
+
+#---------------------------------------------------------------------------------------
+# Output models results 
+results <- dplyr:: filter(logisticModelResults$modelStats, .metric %in% c("accuracy", "sens", "spec", "bal_accuracy", "precision", "roc_auc")) %>%  dplyr:: mutate(.estimate = formattable:: color_bar("#CAC0B6")(.estimate))
+
+cm = logisticModelResults$confMatrix
+dt = data.frame(t(cm$table)) %>% tidyr:: spread(key = Prediction, value = Freq) %>%   
+  dplyr:: mutate(`0` = formattable:: color_tile("lightpink", "lightgreen")(`0`), 
+                 `1` = formattable:: color_tile("lightgreen", "lightpink")(`1`))
+
+kableExtra:: kable(results, able.attr = "style = \"color: black;\"", caption = "Model performance for logistic regression", escape = F) %>% 
+  kableExtra:: kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = TRUE, position = "float_left")
+
+kableExtra:: kable(dt, able.attr = "style = \"color: black;\"", escape = F, caption = "Confusion matrix") %>%
+  kableExtra:: kable_styling(c("striped", "bordered"), full_width = FALSE, position = "left") %>%
+  kableExtra:: add_header_above(c(" ", "Prediction" = 2))
+
+
+```
+
+<br /> 
+
+Chart 3 shows the ROC curve for the logistic regression baseline model, which shows the trade-off between sensitivity and specificity. Classifiers that give curves closer to the top-left corner indicate a better performance [@brett2019].
+
+```{r, include=TRUE, warning=FALSE, message=FALSE, echo=FALSE, eval = TRUE, out.height= "50%", out.width="80%"}
+
+#---------------------------------------------------------------------------------------
+# Output ROC results 
+logisticModelResults$modelAccuracy %>% 
+roc_curve(truth, .pred_1) %>%
+  ggplot2:: ggplot(aes(x = 1 - specificity, y = sensitivity, fill = "LogisticModel", group = "1")) +
+  ggplot2:: geom_path(aes( colour = unname(boe_cols)[1]), show.legend = F, lwd = 2) +
+  ggplot2:: geom_abline(lty = 4, colour = unname(boe_cols)[3], show.legend = FALSE, lwd = 2) +
+  ggplot2:: scale_colour_manual(values = rep(unname(boe_cols),1)) + 
+  ggplot2:: coord_equal() +
+  ggplot2:: theme_minimal(base_size = 16) + 
+  ggplot2:: labs(subtitle = "Chart 3: Logistic regression model ROC")
+
+```
+
+## Machine Learning Classifiers
+
+In this section an array of classifiers are explored. Each model is fitted to the data using a ‘training’ sample. The ‘testing’ sample is used to evaluate each model’s performance in predicting credit union failures. The model fits can be seen in the [Annex](#annex). Once the models have been fitted using the training data, each model's performance can be evaluated according to the criterion outlined in [Chapter 3](#modelfit), when applied to unseen data (out-of-sample). The results are shown in Table 3.2.
+
+<br /> 
+
+```{r fitmodel, include=TRUE, warning=FALSE, message=FALSE, echo=TRUE, eval = FALSE}
+
+#---------------------------------------------------------------------------------------
+# fit random forst model using parsnip rand_forest function, fit using training data 
+randomForest <- parsnip:: rand_forest(mtry = 10, trees = 150, min_n = 6, mode = "classification") %>% 
+                parsnip:: set_engine("randomForest") %>%
+                parsnip:: fit(DEFAULT ~ ., data = train_data)
+
+# run boosted trees alogrithm and test performance 
+boostedTree <- parsnip:: boost_tree(mtry = 10, trees = 100, min_n = 6, mode = "classification") %>% 
+  parsnip:: set_engine("xgboost", importance = 'impurity') %>%
+  parsnip:: fit(DEFAULT ~ ., data = train_data)
+
+# run decision tree and test model performance  
+decisionTree <- parsnip:: decision_tree(mode = "classification", cost_complexity = 10, min_n = 6) %>% 
+  parsnip:: set_engine("C5.0", importance = 'impurity') %>%
+  parsnip:: fit(DEFAULT ~ ., data = train_data)
+
+# run KNN model 
+KNNmodel <- parsnip:: nearest_neighbor(mode = "classification",neighbors = 10) %>% 
+  parsnip:: set_engine("kknn", importance = 'impurity') %>%
+  parsnip:: fit(DEFAULT ~ ., data = train_data)
+
+# run SVM models
+SVMmodel <- parsnip:: svm_rbf(mode = "classification", rbf_sigma = 0.2) %>% 
+  parsnip:: set_engine("kernlab", importance = 'impurity') %>%
+  parsnip:: fit(DEFAULT ~ ., data = train_data)
+
+# run LDA models
+LDAModel <- MASS:: lda(DEFAULT ~ ., data = train_data) 
+
+# run naive bayes models
+NaiveBayesModel <- e1071:: naiveBayes(DEFAULT ~ ., data = train_data) 
+
+# run neural network model with tuning gride
+tuning.grid <- expand.grid(.size=1:6, .decay=0, .bag=FALSE)  
+NeuralNetModel.tuned <- caret:: train(DEFAULT ~ ., data = train_data, method="avNNet", trace=FALSE, tuneGrid=tuning.grid, linout=TRUE, repeats=1)
+
+
+```
+
+
+```{r modelresults, include=TRUE, warning=FALSE, message=FALSE, echo=FALSE, eval = TRUE}
+
+#---------------------------------------------------------------------------------------
+# Output models 
+
+load(file.path(basePath, "./Outputs/ModelResult.RData"))
+
+ModelResult %>% 
+  tidyr:: gather(key = model, value = value, -.metric) %>% 
+  dplyr:: filter(.metric %in% c("accuracy", "sens", "spec", "bal_accuracy", "roc_auc")) %>% 
+  tidyr:: spread(key = .metric , value = value) %>%
+  dplyr:: mutate_if(is.numeric, ~formattable:: color_tile("lightpink", "lightgreen")(.)) %>%
+  kableExtra:: kable(escape = F,table.attr = "style = \"color: black;\"",  caption = "Model performance statistics") %>%
+  kableExtra:: kable_styling(c("striped", "bordered"), full_width = FALSE, position = "left") #%>% 
+  #kableExtra:: scroll_box(width = "100%")
+
+
+```
+
+<br /> 
+
+Table 3.2 shows that the LDA, logistic, Naive Bayes and ANN models perform the best as evaluated using balanced accuracy. The Naive Bayes classifier outperforms the others in terms of specificity (56%), whilst the other three aforementioned models perform well. Chart 4 shows the ROC curve for the models listed above. 
+
+<br /> 
+
+```{r ROCplots, include=TRUE, warning=FALSE, message=FALSE, echo=FALSE, eval = TRUE}
+
+#---------------------------------------------------------------------------------------
+# Output ROC results
+load(file.path(basePath, "./Outputs/ModelAccuracy.RData"))
+
+Logistic <- MakeROCPlot(data = ModelAccuracy, modelType = "logisticModel", title = "Logistic")
+NaiveBayes <- MakeROCPlot(data = ModelAccuracy, modelType = "NaiveBayes", title = "Naive Bayes")
+LDA <- MakeROCPlot(data = ModelAccuracy, modelType = "LDA", title = "LDA")
+NeuralNet <- MakeROCPlot(data = ModelAccuracy, modelType = "NeuralNet", title = "Neural Network")
+
+gridExtra:: grid.arrange(Logistic, NaiveBayes, LDA, NeuralNet, top = grid:: textGrob("Chart 4: ROC for machine learning classifiers",gp=gpar(fontsize=16,font=3)))
+
+```
+
+<br /> 
+
+The steps to build a machine learning system include training, validation and testing. The next section of this chapter explores model validation, which is the process of calibrating the models to maximise out-of-sample performance. This may either mean the variation of a model’s degrees of freedom, like the number of nodes and layers in a neural network, tuning the hyper-parameters using a meta-algorithm or changing the rebalancing method.  
+
+**NOTE:** The data training data has not been rebalanced (as explained in [Chapter 2](#modelsetup)) here, meaning only the standardisation pre-processing steps have been applied the data.
+
+The code in the [Annex](#annex) shows the implementation of four rebalancing methods, using the LDA model. Here the number of folds is set to `k = 10`. The performance metrics are shown in Table 3.3. 
+
+```{r recipe, include=TRUE, warning=FALSE, message=FALSE, echo=FALSE, eval = FALSE}
+
+#---------------------------------------------------------------------------------------
+# prepare training and test data without upsampling 
+
+simple_recipe <- function(dataset){
+  
+  recipes :: recipe(DEFAULT ~ ., data = dataset) %>%
+    
+    recipes:: step_center(all_numeric()) %>%
+    
+    recipes:: step_scale(all_numeric()) %>%
+    
+    recipes:: step_dummy(all_nominal(),- DEFAULT) 
+}
+
+train_recipe <- recipes:: prep(simple_recipe(train), training = train, retain = TRUE)
+train_data <- train_recipe %>% juice 
+test_data <- recipes:: bake(train_recipe, new_data = test) 
+
+
+```
+
+
+```{r rebalancePerformance, include=TRUE, warning=FALSE, message=FALSE, echo=TRUE, eval = FALSE}
+
+method = c("up", "down", "smote", "rose")
+
+ModelPerformance <- lapply(X = c("up", "down", "smote", "rose"),  
+                           FUN = trainControlSample, 
+                           method = "nb", 
+                           resamplingmethod = "boot",
+                           traindata = train_data, 
+                           testdata = test_data, 
+                           numberFolds = 10) 
+
+data <- ModelPerformance %>% purrr:: map(1) %>% purrr:: invoke(rbind, .)
+
+rebalancePerformance <- tidyr:: spread(data, key = Meausure, value = Position)
+
+
+```
+
+
+<br /> 
+
+```{r , include=TRUE, warning=FALSE, message=FALSE, echo=FALSE, eval = TRUE}
+load(file.path(basePath, "./Outputs/rebalancePerformance.RData"))
+
+rebalancePerformance %>% dplyr:: select(-resamplingmethod, -F1, -`Neg Pred Value`, -`Pos Pred Value`, 
+                                        -`Detection Prevalence`, -`Detection Rate`, 
+                                        -Precision, -Prevalence) %>% 
+  dplyr:: mutate_if(is.numeric, ~formattable:: color_tile("lightpink", "lightgreen")(.)) %>%
+  kableExtra:: kable(escape = F,table.attr = "style = \"color: black;\"",  caption = "Model performance statistics for different rebalancing methods") %>%
+  kableExtra:: kable_styling(c("striped", "bordered"), full_width = FALSE, position = "left") #%>% 
+  #kableExtra:: scroll_box(width = "100%")
+
+
+```
+
+<br /> 
+
+Using balanced accuracy, sensitivity and specificity as the performance measures, it appears as though down-sampling and up-sampling are comparable. Up-sampling is chosen as the best rebalancing method, which consists replicating some points from the minority class. The same result holds for the logistic, naive Bayes and neural networks (analysis omitted). The next step is to understand which of the four models performs best when subjected cross validation. Here the number of folds is set to `k = 5`. The cross-validation parameters are set as follows;
+
+* The resampling method: `method = boot` (see annex)
+* Number of folds: `number = 5`, 
+* Rebalancing method: `sampling = up`
+
+Each model is evaluated, using resampling, evaluating each instance to obtain an overall accuracy estimate. The implementation of cross-validation is shown in the [Annex](#annex) with the results displayed in Table 3.4. 
+
+```{r modeloptimalPerformance, include=FALSE, warning=FALSE, message=FALSE, echo=TRUE, eval = FALSE}
+
+modeltypes =  c("lda", "plr", "nb", "nnet")
+
+ModelPerformance <- lapply(X = modeltypes, 
+                           FUN = trainControlSample, 
+                           resamplingmethod = "boot",
+                           samplingMethod = "up", 
+                           traindata = train_data, testdata = test_data, 
+                           numberFolds = 5)
+
+data <- ModelPerformance %>% purrr:: map(1) %>% purrr:: invoke(rbind, .)
+
+rebalancePerformance <- tidyr:: spread(data, key = Meausure, value = Position)
+
+
+```
+
+```{r , include=TRUE, warning=FALSE, message=FALSE, echo=FALSE, eval = TRUE}
+load(file.path(basePath, "./Outputs/AllModels.RData"))
+
+AllModels %>% dplyr:: select(-resamplingmethod,-samplingMethod, -F1, -`Neg Pred Value`, 
+                             -`Pos Pred Value`, -`Detection Prevalence`, -`Detection Rate`, 
+                             -Precision, -Prevalence) %>% 
+  dplyr:: mutate_if(is.numeric, ~formattable:: color_tile("lightpink", "lightgreen")(.)) %>%
+  kableExtra:: kable(escape = F,table.attr = "style = \"color: black;\"",  caption = "Model performance statistics, cross validated") %>%
+  kableExtra:: kable_styling(c("striped", "bordered"), full_width = FALSE, position = "left")# %>% 
+  # kableExtra:: scroll_box(width = "100%")
+
+
+```
+
+```{r , include=TRUE, warning=FALSE, message=FALSE, echo=FALSE, eval = TRUE}
+load(file.path(basePath, "./Outputs/ConfusionMatrices.RData"))
+modeltypes = c("lda", "plr", "nb", "nnet")
+cm = ConfusionMatrices
+
+lda = data.frame(t(cm[[1]])) %>% tidyr:: spread(key = Prediction, value = Freq) %>%   
+  dplyr:: mutate(`0` = formattable:: color_tile("lightpink", "lightgreen")(`0`), 
+                 `1` = formattable:: color_tile("lightgreen", "lightpink")(`1`))
+
+plr = data.frame(t(cm[[2]])) %>% tidyr:: spread(key = Prediction, value = Freq) %>%   
+  dplyr:: mutate(`0` = formattable:: color_tile("lightpink", "lightgreen")(`0`), 
+                 `1` = formattable:: color_tile("lightgreen", "lightpink")(`1`))
+
+nb = data.frame(t(cm[[3]])) %>% tidyr:: spread(key = Prediction, value = Freq) %>%   
+  dplyr:: mutate(`0` = formattable:: color_tile("lightpink", "lightgreen")(`0`), 
+                 `1` = formattable:: color_tile("lightgreen", "lightpink")(`1`))
+
+nnet = data.frame(t(cm[[4]])) %>% tidyr:: spread(key = Prediction, value = Freq) %>%   
+  dplyr:: mutate(`0` = formattable:: color_tile("lightpink", "lightgreen")(`0`), 
+                 `1` = formattable:: color_tile("lightgreen", "lightpink")(`1`))
+
+kableExtra:: kable(lda, able.attr = "style = \"color: black;\"", escape = F, caption = "LDA Confusion matrix") %>%
+  kableExtra:: kable_styling(c("striped", "bordered"), full_width = FALSE, position = "float_left") %>%
+  kableExtra:: add_header_above(c(" ", "Prediction" = 2)) %>% 
+  kableExtra:: add_header_above(c("LDA" = 3))
+
+kableExtra:: kable(plr, able.attr = "style = \"color: black;\"", escape = F, caption = "Logistic case") %>%
+  kableExtra:: kable_styling(c("striped", "bordered"), full_width = FALSE, position = "center") %>%
+  kableExtra:: add_header_above(c(" ", "Prediction" = 2)) %>% 
+  kableExtra:: add_header_above(c("Logistic" = 3))
+
+kableExtra:: kable(nb, able.attr = "style = \"color: black;\"", escape = F, caption = NULL) %>%
+  kableExtra:: kable_styling(c("striped", "bordered"), full_width = FALSE, position = "float_left") %>%
+  kableExtra:: add_header_above(c(" ", "Prediction" = 2)) %>% 
+  kableExtra:: add_header_above(c("Naive Bayes" = 3))
+
+kableExtra:: kable(nnet, able.attr = "style = \"color: black;\"", escape = F, caption = NULL) %>%
+  kableExtra:: kable_styling(c("striped", "bordered"), full_width = FALSE, position = "center") %>%
+  kableExtra:: add_header_above(c(" ", "Prediction" = 2)) %>% 
+  kableExtra:: add_header_above(c("Neural Networks" = 3))
+
+
+```
+
+<br /> 
+
+Looking at the performance measures, LDA outperforms the other models at 72% balanced accuracy and 62% specificity, which is comparable to the logistic model. The LDA model is successfully classifying `DEFAULT` cases around 62% of the time, and is raising few 'false flags' within the test set. The LDA correctly classifies 18 out of 29 `DEFAULT` observations; however the model raises 386 false positives and performs the worst as measured by sensitivity. The LDA sensitivity performance is much lower than the other classifiers, which is a counter to the supervisory preference of minimising the number of false flags of viable entities. The ANN performs best in terms of sensitivity (92%). The model correctly identifying 15 out of 29 `DEFAULT` observations, whilst raising significantly less false positives (171). The naive Bayes performs comparably with ANN. Given the overall specificity performance comparability between the LDA and neural networks, the neural network algorithm is considered preferable on the basis it produces significantly less false positives. Cross-validation is performed on the ANN by applying a set of permutations to the model’s degrees of freedom in an attempt to enhance predictive performance. This is explored in the next [Chapter 4](#cv). A simplified visual representation of the neural network (`hidden = 3`) can be seen below in Chart 5. 
+
+```{r , include=TRUE, warning=FALSE, message=FALSE, echo=FALSE, eval = TRUE}
+load(file.path(basePath, "./Outputs/NeuralNetwork.RData"))
+
+# fit model with 3 layers, step max to ensure convergence
+#set.seed(2)
+#NN = neuralnet(DEFAULT~., train_data, hidden = 3 , linear.output = F, stepmax = 1e6)
+
+# plot neural network
+NeuralNetTools:: plotnet(NN, bord_col = "#1E1E1E", circle_col = "#A51140", circle_cex = 3, alpha_val = 0.5, pos_col = "#005E6E",  neg_col = "#CAC0B6") 
+
+graphics:: title(main = list("Chart 5: Neural interpretation diagram with 3 hidden layers", cex = 1,
+                   col = "black", font = 1))
+
+
+```
